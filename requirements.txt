@@ -1,1 +1,6 @@
-
+opencv-python-headless
+ultralytics
+requests
+pandas
+numpy
+streamlink
