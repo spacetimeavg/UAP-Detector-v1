@@ -2,14 +2,15 @@ name: UAP Detector V1
 
 on:
   schedule:
-    # Uruchamia skrypt automatycznie co 15 minut
     - cron: '*/15 * * * *'
   workflow_dispatch:
-    # Pozwala na ręczne uruchomienie przyciskiem w zakładce Actions
 
 jobs:
   run-detector:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: write  # Daje botowi prawo do zapisywania zdjęć w repozytorium
 
     steps:
       - name: Pobieranie kodu repozytorium
@@ -27,3 +28,11 @@ jobs:
 
       - name: Uruchomienie detektora UAP
         run: python app.py
+
+      - name: Zapisanie wykrytych klatek w repozytorium
+        run: |
+          git config --global user.name "UAP-Bot"
+          git config --global user.email "bot@uap-detector.com"
+          git add screenshots/
+          git commit -m "Automatyczny zapis wykryć UAP [skip ci]" || exit 0
+          git push
