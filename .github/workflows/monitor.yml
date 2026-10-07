@@ -6,6 +6,11 @@ on:
     - cron: '3,18,33,48 * * * *'
   workflow_dispatch:
 
+# Zapobiega nakładaniu się procesów (nowy run czeka lub jest pomijany, gdy stary jeszcze trwa)
+concurrency:
+  group: uap-detector-single-run
+  cancel-in-progress: false
+
 jobs:
   run-detector:
     runs-on: ubuntu-latest
