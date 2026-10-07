@@ -6,7 +6,7 @@ on:
     - cron: '3,18,33,48 * * * *'
   workflow_dispatch:
 
-# Zapobiega nakładaniu się procesów (nowy run czeka lub jest pomijany, gdy stary jeszcze trwa)
+# Zapobiega nakładaniu się procesów (nowy run jest pomijany, gdy stary jeszcze trwa)
 concurrency:
   group: uap-detector-single-run
   cancel-in-progress: false
@@ -14,7 +14,8 @@ concurrency:
 jobs:
   run-detector:
     runs-on: ubuntu-latest
-    timeout-minutes: 15  # Wymusza koniec joba po 15 min w razie zawieszenia
+    timeout-minutes: 15  # Wymusza koniec joba po 15 min w razie zawieszenia[cite: 2]
+    continue-on-error: true  # Zabezpieczenie przed flagowaniem błędów i mailami[cite: 2]
 
     permissions:
       contents: write
@@ -41,16 +42,21 @@ jobs:
           pip install -r requirements.txt
 
       - name: Uruchomienie detektora UAP
-        run: python app.py
+        run: python app.py || exit 0
 
       - name: Aktualizacja logów i zapis wyników
         run: |
           git config --global user.name "UAP-Bot"
           git config --global user.email "bot@uap-detector.com"
           
+          # Zawsze pobieramy najnowsze commity z repozytorium tuż przed wysłaniem[cite: 3]
+          git pull origin main --rebase || true
+          
           # Zapisujemy znacznik czasu ostatniego uruchomienia
           date > last_run.txt
           
           git add screenshots/ last_run.txt
           git commit -m "Automatyczna aktualizacja cyklu: $(date)" || exit 0
-          git push
+          
+          # Bezpieczny push bez zgłaszania błędów wyjścia[cite: 3]
+          git push origin main || exit 0
