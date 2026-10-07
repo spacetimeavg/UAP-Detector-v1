@@ -30,7 +30,7 @@ def fetch_cameras_from_sheet():
     try:
         df = pd.read_csv(SHEET_URL)
         if df.empty or df.shape[1] < 2:
-            print(f"❌ [BŁĄD STRUKTURY] Tabela z arkusza jest pusta lub ma mniej niż 2 kolumny.")
+            print("❌ [BŁĄD STRUKTURY] Tabela z arkusza jest pusta lub ma mniej niż 2 kolumny.")
             return {}
 
         # Wymuszamy odczyt: Kolumna 0 (A) -> ID, Kolumna 1 (B) -> URL
@@ -49,12 +49,22 @@ def fetch_cameras_from_sheet():
         return {}
 
 def get_yt_stream_url(yt_url):
-    """Wyciąga czysty, bezpośredni URL .m3u8 z transmisji YouTube Live za pomocą yt-dlp"""
+    """Wyciąga bezpośredni URL .m3u8 z YouTube z użyciem klientów mobilnych/embedded (omijanie weryfikacji bota)"""
     ydl_opts = {
         'format': 'best',
         'quiet': True,
         'no_warnings': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios', 'mweb', 'web']
+            }
+        }
     }
+    
+    # Dołączenie cookies, jeśli plik istnieje
+    if os.path.exists("cookies.txt"):
+        ydl_opts['cookiefile'] = "cookies.txt"
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(yt_url, download=False)
@@ -73,7 +83,8 @@ def get_camera_stream(url):
         if direct_url:
             cap = cv2.VideoCapture(direct_url)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            return cap
+            if cap.isOpened():
+                return cap
 
     # 2. Inne strony/strumienie przez Streamlink
     try:
@@ -82,7 +93,8 @@ def get_camera_stream(url):
             stream_url = streams['best'].to_url()
             cap = cv2.VideoCapture(stream_url)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            return cap
+            if cap.isOpened():
+                return cap
     except Exception:
         pass
 
