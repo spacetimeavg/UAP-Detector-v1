@@ -12,8 +12,8 @@ from ultralytics import YOLO
 SCREENSHOT_DIR = "screenshots"
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
-# Twój publiczny link CSV z Google Sheets:
-SHEETS_CSV_URL = "https://docs.google.com/spreadsheets/d/1zGjO7LvDWbewwL5vvmtSL8EFm0wTrfiKniH-a02aTjo/edit?resourcekey=&gid=1919540486#gid=1919540486"
+# Prawidłowy link eksportowy CSV z Google Sheets:
+SHEETS_CSV_URL = "https://docs.google.com/spreadsheets/d/1zGjO7LvDWbewwL5vvmtSL8EFm0wTrfiKniH-a02aTjo/export?format=csv&gid=1919540486"
 
 # Ładowanie lekkiego modelu YOLO na CPU
 model = YOLO("yolov8n.pt")
@@ -23,7 +23,8 @@ previous_frames = {}
 
 def fetch_camera_list(csv_url):
     try:
-        df = pd.read_csv(csv_url)
+        # dodano on_bad_lines='skip' żeby ignorować uszkodzone/nierówne wiersze
+        df = pd.read_csv(csv_url, on_bad_lines='skip')
         if "stream_url" in df.columns:
             return df["stream_url"].dropna().unique().tolist()
         elif not df.empty:
@@ -119,7 +120,7 @@ def process_motion_and_detect(frame, camera_id):
                 cls_id = int(box.cls[0])
                 conf = float(box.conf[0])
                 print(
-                    f"   └─ YOLO wykrył obiekt ID: {cls_id} (Pewność: {conf:.2f})"
+                    f"    └─ YOLO wykrył obiekt ID: {cls_id} (Pewność: {conf:.2f})"
                 )
 
 
