@@ -1,15 +1,23 @@
+import os
 import cv2
 import time
-import os
 import pandas as pd
+import streamlink
+import yt_dlp
 from ultralytics import YOLO
+
+# Ustawienie nagłówka przeglądarki Chrome dla backendu FFmpeg w OpenCV (omijanie blokad 403)
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+    "http_persistent|0;user_agent|Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
 
 # Parametry
 RUNNER_ID = os.getenv("RUNNER_ID", "1")
 SCREENSHOT_DIR = "screenshots"
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
-# Prawidłowy adres eksportu CSV z Twojego Arkusza Google
+# Adres eksportu CSV z Twojego Arkusza Google
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1zGjO7LvDWbewwL5vvmtSL8EFm0wTrfiKniH-a02aTjo/export?format=csv&gid=1919540486"
 
 model = YOLO("yolov8n.pt")
@@ -17,26 +25,68 @@ KNOWN_IGNORE_CLASSES = [4, 14]  # 4 = samolot, 14 = ptak
 clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 
 def fetch_cameras_from_sheet():
-    """Pobiera listę kamer bezpośrednio z pliku CSV wygenerowanego z Google Sheets"""
+    """Pobiera listę kamer bezpośrednio z pliku CSV z Google Sheets po indeksie kolumn (A: ID, B: URL)"""
     print(f"[INFO] Pobieranie konfiguracji z Google Sheets: {SHEET_URL}")
     try:
         df = pd.read_csv(SHEET_URL)
-        df.columns = df.columns.str.strip()
-        
-        # Oczekiwane nazwy kolumn: 'id' oraz 'stream_url'
-        if 'id' in df.columns and 'stream_url' in df.columns:
-            cameras = dict(zip(df['id'], df['stream_url']))
-            print(f"✅ [SUCCESS] Załadowano {len(cameras)} kamer z arkusza.")
-            return cameras
-        else:
-            print(f"❌ [BŁĄD STRUKTURY] Brak kolumn 'id' lub 'stream_url'. Znaleziono: {list(df.columns)}")
+        if df.empty or df.shape[1] < 2:
+            print(f"❌ [BŁĄD STRUKTURY] Tabela z arkusza jest pusta lub ma mniej niż 2 kolumny.")
             return {}
+
+        # Wymuszamy odczyt: Kolumna 0 (A) -> ID, Kolumna 1 (B) -> URL
+        cam_ids = df.iloc[:, 0].astype(str).str.strip()
+        stream_urls = df.iloc[:, 1].astype(str).str.strip()
+
+        cameras = {}
+        for c_id, c_url in zip(cam_ids, stream_urls):
+            if c_id and c_url and c_url.lower() != 'nan':
+                cameras[c_id] = c_url
+
+        print(f"✅ [SUCCESS] Załadowano {len(cameras)} kamer z arkusza: {list(cameras.keys())}")
+        return cameras
     except Exception as e:
         print(f"❌ [BŁĄD POBIERANIA SHEETS]: {e}")
         return {}
 
+def get_yt_stream_url(yt_url):
+    """Wyciąga czysty, bezpośredni URL .m3u8 z transmisji YouTube Live za pomocą yt-dlp"""
+    ydl_opts = {
+        'format': 'best',
+        'quiet': True,
+        'no_warnings': True,
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(yt_url, download=False)
+            return info.get('url', None)
+    except Exception as e:
+        print(f"⚠️ Błąd yt-dlp dla {yt_url}: {e}")
+        return None
+
 def get_camera_stream(url):
-    """Nawiązanie połączenia ze strumieniem OpenCV"""
+    """Nawiązanie połączenia ze strumieniem (obsługuje YT Live, Streamlink i bezpośrednie adresy)"""
+    url = str(url).strip()
+
+    # 1. Transmisje YouTube Live (yt-dlp)
+    if "youtube.com" in url or "youtu.be" in url:
+        direct_url = get_yt_stream_url(url)
+        if direct_url:
+            cap = cv2.VideoCapture(direct_url)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            return cap
+
+    # 2. Inne strony/strumienie przez Streamlink
+    try:
+        streams = streamlink.streams(url)
+        if streams and 'best' in streams:
+            stream_url = streams['best'].to_url()
+            cap = cv2.VideoCapture(stream_url)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            return cap
+    except Exception:
+        pass
+
+    # 3. Próba bezpośrednia przez OpenCV (RTSP / m3u8 / MP4)
     cap = cv2.VideoCapture(url)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     return cap
@@ -68,7 +118,7 @@ def process_frame(frame, cam_id, previous_frames):
     
     for contour in contours:
         area = cv2.contourArea(contour)
-        # Odrzucanie owadów/szumów (<50px) oraz wielkich plików przelotowych
+        # Odrzucanie owadów/szumów (<50px) oraz wielkich obiektów
         if 50 < area < 3500:
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             filename = f"{SCREENSHOT_DIR}/node{RUNNER_ID}_{cam_id}_{timestamp}.jpg"
@@ -89,7 +139,7 @@ def process_frame(frame, cam_id, previous_frames):
                         else:
                             is_unknown = True
 
-            # Jeśli to zwykły ptak/samolot, usuwamy wygenerowany plik zrzutu
+            # Jeśli wykryto wyłącznie znane obiekty (ptak/samolot), usuwamy plik zrzutu
             if has_ignored and not is_unknown:
                 if os.path.exists(filename):
                     os.remove(filename)
@@ -141,7 +191,7 @@ def run_monitoring_session(duration_seconds=780):
             retry_counts[cam_id] = 0
             frame_count += 1
 
-            # Klatka podglądowa dla każdej ruszającej kamery
+            # Klatka podglądowa dla każdej aktywnej kamery
             if cam_id not in saved_test_frames:
                 test_filename = f"{SCREENSHOT_DIR}/test_node{RUNNER_ID}_{cam_id}.jpg"
                 cv2.imwrite(test_filename, frame)
