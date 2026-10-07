@@ -12,6 +12,9 @@ from ultralytics import YOLO
 SCREENSHOT_DIR = "screenshots"
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
+# Czas działania skryptu w sekundach (13 minut = 780 sekund)
+MAX_RUN_DURATION = 780
+
 # Prawidłowy link eksportowy CSV z Google Sheets:
 SHEETS_CSV_URL = "https://docs.google.com/spreadsheets/d/1zGjO7LvDWbewwL5vvmtSL8EFm0wTrfiKniH-a02aTjo/export?format=csv&gid=1919540486"
 
@@ -130,10 +133,15 @@ if __name__ == "__main__":
     print(f"[INFO] Załadowano {len(camera_list)} źródeł z arkusza.")
 
     start_time = time.time()
-    # Pętla działa przez 5 minut (300 sekund)
-    while time.time() - start_time < 300:
+    
+    # Pętla działa przez 13 minut (780 sekund)
+    while time.time() - start_time < MAX_RUN_DURATION:
         loop_start = time.time()
         for idx, raw_url in enumerate(camera_list):
+            # Przerwij wykonywanie pętli wewnątrz, jeśli przekroczono limit czasu
+            if time.time() - start_time >= MAX_RUN_DURATION:
+                break
+
             frame = grab_frame_from_stream(raw_url)
             if frame is not None:
                 process_motion_and_detect(frame, camera_id=idx)
@@ -141,3 +149,6 @@ if __name__ == "__main__":
         elapsed = time.time() - loop_start
         if elapsed < 1.0:
             time.sleep(1.0 - elapsed)
+
+    print(f"[INFO] Zakończono sesję analizy po {int(time.time() - start_time)} sekundach.")
+    cv2.destroyAllWindows()
